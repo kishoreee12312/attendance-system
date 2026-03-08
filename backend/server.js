@@ -6,6 +6,7 @@ const authRoutes = require("./routes/authRoutes");
 const subjectRoutes = require("./routes/subjectRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const bootstrapUsers = require("./utils/bootstrapUsers");
 require("dotenv").config();
 
 const app = express();
@@ -48,7 +49,13 @@ app.get("/", (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 connectDB()
-  .then(() => {
+  .then(async () => {
+    try {
+      await bootstrapUsers();
+    } catch (error) {
+      console.error("Bootstrap users warning:", error.message);
+    }
+
     app.listen(PORT, () => console.log(`Server running on ${PORT}`));
   })
   .catch((err) => {

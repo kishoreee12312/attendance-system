@@ -21,6 +21,8 @@ services:
         sync: false
       - key: EMAIL_ALERTS_ENABLED
         value: "false"
+      - key: AUTO_BOOTSTRAP_USERS
+        value: "true"
 
   - type: web
     name: attendance-frontend
