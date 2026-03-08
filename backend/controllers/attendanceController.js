@@ -398,6 +398,41 @@ exports.generateQR = async (req, res) => {
     }
 
     const effectiveClassName = normalizedClassName || (subject.classNames || [])[0] || undefined;
+    if (!effectiveClassName) {
+      return res.status(400).json({ message: "className is required for QR attendance" });
+    }
+
+    const attendanceDate = normalizeToDayStart(new Date());
+    const existingForClassPeriod = await Attendance.findOne({
+      className: effectiveClassName,
+      date: attendanceDate,
+      period: periodNumber
+    });
+    if (existingForClassPeriod) {
+      return res.status(400).json({
+        message: `Attendance already initialized/marked for class ${effectiveClassName}, period ${periodNumber} today`
+      });
+    }
+
+    const classStudents = await User.find({
+      role: "student",
+      className: effectiveClassName
+    }).select("_id");
+    if (!classStudents.length) {
+      return res.status(400).json({ message: `No students found in class ${effectiveClassName}` });
+    }
+
+    const initialRows = classStudents.map((student) => ({
+      student: student._id,
+      subject: subjectId,
+      className: effectiveClassName,
+      date: attendanceDate,
+      period: periodNumber,
+      status: "Absent",
+      markedBy: req.user.id
+    }));
+    await Attendance.insertMany(initialRows, { ordered: false });
+
     const token = uuidv4();
     const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
 
@@ -456,25 +491,28 @@ exports.scanQR = async (req, res) => {
       return res.status(403).json({ message: `This QR is for class ${classForQr}. Your class is ${studentClassName}.` });
     }
 
-    const alreadyMarked = await Attendance.findOne({
+    const attendanceRecord = await Attendance.findOne({
       student: req.user.id,
       subject: session.subject,
       date: today,
       period: qrPeriod,
       className: classForQr
     });
-    if (alreadyMarked) {
+    if (!attendanceRecord) {
+      return res.status(400).json({ message: "Attendance not initialized for this QR session" });
+    }
+
+    if (attendanceRecord.status === "Present") {
       return res.status(400).json({ message: "Attendance already marked for today" });
     }
 
-    await Attendance.create({
-      student: req.user.id,
-      subject: session.subject,
-      className: classForQr,
-      date: today,
-      period: qrPeriod,
-      status: "Present",
-      markedBy: session.generatedBy || req.user.id
+    await Attendance.updateOne({
+      _id: attendanceRecord._id
+    }, {
+      $set: {
+        status: "Present",
+        markedBy: session.generatedBy || req.user.id
+      }
     });
     await sendLowAttendanceAlertsForStudents([req.user.id]);
 
