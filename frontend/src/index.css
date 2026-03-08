@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-main: #f4f8fb;
+  --bg-accent: #dff2eb;
+  --ink-primary: #1e2a39;
+  --ink-muted: #556173;
+  --brand-primary: #0f766e;
+  --brand-secondary: #ea580c;
+  --card-bg: rgba(255, 255, 255, 0.82);
+  --card-border: rgba(15, 118, 110, 0.16);
+}
+
+body {
+  margin: 0;
+  font-family: "Poppins", "Montserrat", "Nunito", sans-serif;
+  color: var(--ink-primary);
+  background:
+    radial-gradient(circle at 12% 8%, #b8ead8 0%, transparent 28%),
+    radial-gradient(circle at 88% 16%, #ffd7a8 0%, transparent 30%),
+    linear-gradient(135deg, var(--bg-main), #eef5ff 45%, #f7f3eb);
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.glass-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  backdrop-filter: blur(10px);
+  border-radius: 18px;
+  box-shadow: 0 16px 36px rgba(30, 42, 57, 0.1);
+}
+
+.page-title {
+  color: var(--ink-primary);
+  letter-spacing: 0.02em;
+}
