@@ -20,8 +20,9 @@ services:
       - key: EMAIL_PASS
         sync: false
 
-  - type: static
+  - type: web
     name: attendance-frontend
+    env: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: build
