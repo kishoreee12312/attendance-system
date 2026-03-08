@@ -6,9 +6,19 @@ const qrSessionSchema = new mongoose.Schema({
     ref: "Subject",
     required: true
   },
+  generatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User"
+  },
   className: {
     type: String,
     trim: true
+  },
+  period: {
+    type: Number,
+    min: 1,
+    max: 5,
+    default: 1
   },
   token: {
     type: String,

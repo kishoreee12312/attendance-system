@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Chart, BarElement, CategoryScale, LinearScale } from "chart.js";
 import { Bar } from "react-chartjs-2";
+import { Html5QrcodeScanner } from "html5-qrcode";
 import Layout from "../components/Layout";
 import API from "../services/api";
 
@@ -13,39 +14,89 @@ function StudentDashboard() {
   const [modalMsg, setModalMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [percentages, setPercentages] = useState([]);
+  const [scannerActive, setScannerActive] = useState(false);
+  const scannerRef = useRef(null);
+  const scannerSectionRef = useRef(null);
+
+  const loadDashboard = async () => {
+    try {
+      const res = await API.get("/attendance/subjectwise");
+      const labels = res.data.map((item) => item.subject);
+      const currentPercentages = res.data.map((item) => Number(item.percentage));
+
+      setData({
+        labels,
+        datasets: [
+          {
+            label: "Attendance %",
+            data: currentPercentages,
+            backgroundColor: ["#0f766e", "#ea580c", "#0ea5e9", "#16a34a", "#f59e0b"],
+            borderRadius: 10,
+            borderWidth: 0
+          }
+        ]
+      });
+
+      setPercentages(currentPercentages);
+      setLowAttendance(currentPercentages.some((p) => p < 75));
+    } catch (error) {
+      setModalMsg(error?.response?.data?.message || "Failed to load attendance data");
+      setShowModal(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadDashboard = async () => {
-      try {
-        const res = await API.get("/attendance/subjectwise");
-        const labels = res.data.map((item) => item.subject);
-        const currentPercentages = res.data.map((item) => Number(item.percentage));
-
-        setData({
-          labels,
-          datasets: [
-            {
-              label: "Attendance %",
-              data: currentPercentages,
-              backgroundColor: ["#0f766e", "#ea580c", "#0ea5e9", "#16a34a", "#f59e0b"],
-              borderRadius: 10,
-              borderWidth: 0
-            }
-          ]
-        });
-
-        setPercentages(currentPercentages);
-        setLowAttendance(currentPercentages.some((p) => p < 75));
-      } catch (error) {
-        setModalMsg(error?.response?.data?.message || "Failed to load attendance data");
-        setShowModal(true);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadDashboard();
   }, []);
+
+  useEffect(() => {
+    if (!scannerActive) {
+      return;
+    }
+
+    const scanner = new Html5QrcodeScanner(
+      "student-qr-reader",
+      { fps: 10, qrbox: 250 },
+      false
+    );
+    scannerRef.current = scanner;
+
+    scanner.render(
+      async (decodedText) => {
+        try {
+          let token = decodedText;
+          try {
+            const parsed = JSON.parse(decodedText);
+            token = parsed?.token || decodedText;
+          } catch (parseError) {
+            token = decodedText;
+          }
+          await API.post("/attendance/scan-qr", { token });
+          setModalMsg("Attendance marked successfully.");
+          await loadDashboard();
+        } catch (error) {
+          setModalMsg(error?.response?.data?.message || "Invalid or expired QR.");
+        } finally {
+          setShowModal(true);
+          if (scannerRef.current) {
+            await scannerRef.current.clear().catch(() => {});
+            scannerRef.current = null;
+          }
+          setScannerActive(false);
+        }
+      },
+      () => {}
+    );
+
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.clear().catch(() => {});
+        scannerRef.current = null;
+      }
+    };
+  }, [scannerActive]);
 
   const overallPerformance = useMemo(() => {
     if (!percentages.length) {
@@ -68,6 +119,15 @@ function StudentDashboard() {
           <div className="lg:col-span-2">
             <p className="text-xs uppercase tracking-[0.3em] font-bold text-teal-700">Student Overview</p>
             <h2 className="page-title text-4xl font-black mt-2">My Attendance Profile</h2>
+            <button
+              className="mt-4 bg-teal-700 text-white px-4 py-2 rounded-lg font-semibold"
+              onClick={() => {
+                scannerSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                setScannerActive(true);
+              }}
+            >
+              Open QR Scanner
+            </button>
           </div>
           <div className="glass-card p-4">
             <div className="flex items-center justify-between mb-2">
@@ -142,6 +202,36 @@ function StudentDashboard() {
                 />
               </div>
             )}
+            <div ref={scannerSectionRef} className="glass-card p-6 mt-6">
+              <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
+                <h3 className="text-xl font-bold text-slate-800">QR Attendance</h3>
+                {!scannerActive ? (
+                  <button
+                    className="bg-teal-700 text-white px-4 py-2 rounded-lg font-semibold"
+                    onClick={() => setScannerActive(true)}
+                  >
+                    Start QR Scan
+                  </button>
+                ) : (
+                  <button
+                    className="bg-rose-600 text-white px-4 py-2 rounded-lg font-semibold"
+                    onClick={async () => {
+                      if (scannerRef.current) {
+                        await scannerRef.current.clear().catch(() => {});
+                        scannerRef.current = null;
+                      }
+                      setScannerActive(false);
+                    }}
+                  >
+                    Stop Scan
+                  </button>
+                )}
+              </div>
+              <p className="text-sm text-slate-500 mb-3">
+                Scan the faculty QR within 2 minutes to mark attendance for your account.
+              </p>
+              <div id="student-qr-reader" className="w-full max-w-md" />
+            </div>
           </>
         )}
 

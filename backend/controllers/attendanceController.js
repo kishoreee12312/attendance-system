@@ -377,25 +377,52 @@ exports.getClassManagementData = async (req, res) => {
 // Generate QR for Attendance (Faculty)
 exports.generateQR = async (req, res) => {
   try {
-    const { subjectId, className } = req.body;
+    const { subjectId, className, period } = req.body;
     if (!subjectId) {
       return res.status(400).json({ message: "subjectId is required" });
     }
 
+    const periodNumber = Number(period ?? 1);
+    if (!Number.isInteger(periodNumber) || periodNumber < 1 || periodNumber > 5) {
+      return res.status(400).json({ message: "Period must be between 1 and 5" });
+    }
+
+    const normalizedClassName = className ? className.trim().toUpperCase() : null;
+    const subject = await Subject.findOne({ _id: subjectId, faculty: req.user.id }).select("classNames");
+    if (!subject) {
+      return res.status(403).json({ message: "You are not allowed to generate QR for this subject" });
+    }
+
+    if (normalizedClassName && !(subject.classNames || []).includes(normalizedClassName)) {
+      return res.status(400).json({ message: `Subject is not assigned for class ${normalizedClassName}` });
+    }
+
+    const effectiveClassName = normalizedClassName || (subject.classNames || [])[0] || undefined;
     const token = uuidv4();
     const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
 
     await QrSession.create({
       subject: subjectId,
-      className: className ? className.trim().toUpperCase() : undefined,
+      generatedBy: req.user.id,
+      className: effectiveClassName,
+      period: periodNumber,
       token,
       expiresAt
     });
 
-    const qrData = JSON.stringify({ token });
+    const qrData = JSON.stringify({
+      token,
+      className: effectiveClassName,
+      period: periodNumber
+    });
     const qrImage = await QRCode.toDataURL(qrData);
 
-    res.json({ qrImage, expiresAt });
+    res.json({
+      qrImage,
+      expiresAt,
+      className: effectiveClassName,
+      period: periodNumber
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -420,9 +447,15 @@ exports.scanQR = async (req, res) => {
     }
 
     const today = normalizeToDayStart(new Date());
-    const qrPeriod = 1;
+    const qrPeriod = Number(session.period ?? 1);
     const subject = await Subject.findById(session.subject).select("classNames");
     const classForQr = (session.className || subject?.classNames?.[0] || "GENERAL").toUpperCase();
+    const student = await User.findById(req.user.id).select("className");
+    const studentClassName = (student?.className || "").trim().toUpperCase();
+    if (classForQr !== "GENERAL" && studentClassName && studentClassName !== classForQr) {
+      return res.status(403).json({ message: `This QR is for class ${classForQr}. Your class is ${studentClassName}.` });
+    }
+
     const alreadyMarked = await Attendance.findOne({
       student: req.user.id,
       subject: session.subject,
@@ -441,7 +474,7 @@ exports.scanQR = async (req, res) => {
       date: today,
       period: qrPeriod,
       status: "Present",
-      markedBy: req.user.id
+      markedBy: session.generatedBy || req.user.id
     });
     await sendLowAttendanceAlertsForStudents([req.user.id]);
 

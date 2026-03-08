@@ -11,6 +11,8 @@ function FacultyDashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [attendance, setAttendance] = useState({});
   const [qrImage, setQrImage] = useState("");
+  const [qrExpiresAt, setQrExpiresAt] = useState(null);
+  const [qrSecondsLeft, setQrSecondsLeft] = useState(0);
   const [showModal, setShowModal] = useState(false);
   const [modalMsg, setModalMsg] = useState("");
   const [loading, setLoading] = useState(true);
@@ -84,7 +86,7 @@ function FacultyDashboard() {
     try {
       await API.post("/attendance/mark", {
         className: selectedClass,
-        subjectId: selectedClassSubject?._id,
+        subjectId: selectedClassSubject?.subjectId || selectedClassSubject?._id,
         period: Number(selectedPeriod),
         date: new Date(),
         records
@@ -104,20 +106,43 @@ function FacultyDashboard() {
       setShowModal(true);
       return;
     }
+    if (!selectedPeriod) {
+      setModalMsg("Select a period (1-5) first.");
+      setShowModal(true);
+      return;
+    }
 
     try {
       const res = await API.post("/attendance/generate-qr", {
-        subjectId: selectedClassSubject._id,
-        className: selectedClass
+        subjectId: selectedClassSubject.subjectId || selectedClassSubject._id,
+        className: selectedClass,
+        period: Number(selectedPeriod)
       });
       setQrImage(res.data.qrImage);
-      setModalMsg("QR code generated.");
+      setQrExpiresAt(res.data.expiresAt || null);
+      setModalMsg(`QR generated for ${selectedClass}, period ${selectedPeriod}. Expires in 2 minutes.`);
     } catch (error) {
       setModalMsg(error?.response?.data?.message || "Error generating QR code.");
     }
 
     setShowModal(true);
   };
+
+  useEffect(() => {
+    if (!qrExpiresAt) {
+      setQrSecondsLeft(0);
+      return;
+    }
+
+    const tick = () => {
+      const diff = Math.max(0, Math.floor((new Date(qrExpiresAt).getTime() - Date.now()) / 1000));
+      setQrSecondsLeft(diff);
+    };
+
+    tick();
+    const intervalId = setInterval(tick, 1000);
+    return () => clearInterval(intervalId);
+  }, [qrExpiresAt]);
 
   return (
     <Layout>
@@ -233,7 +258,14 @@ function FacultyDashboard() {
                     </button>
                     {qrImage && (
                       <div className="mt-5 flex justify-center">
-                        <img src={qrImage} alt="QR Code" width="210" className="rounded-xl border border-slate-100 shadow" />
+                        <div className="text-center">
+                          <img src={qrImage} alt="QR Code" width="210" className="rounded-xl border border-slate-100 shadow" />
+                          <p className={`mt-3 text-sm font-semibold ${qrSecondsLeft > 0 ? "text-teal-700" : "text-rose-600"}`}>
+                            {qrSecondsLeft > 0
+                              ? `Expires in ${String(Math.floor(qrSecondsLeft / 60)).padStart(2, "0")}:${String(qrSecondsLeft % 60).padStart(2, "0")}`
+                              : "QR expired. Generate again."}
+                          </p>
+                        </div>
                       </div>
                     )}
                   </div>
