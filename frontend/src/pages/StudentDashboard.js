@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Chart, BarElement, CategoryScale, LinearScale } from "chart.js";
 import { Bar } from "react-chartjs-2";
-import { Html5QrcodeScanner } from "html5-qrcode";
+import { Html5Qrcode } from "html5-qrcode";
 import Layout from "../components/Layout";
 import API from "../services/api";
 
@@ -15,7 +15,9 @@ function StudentDashboard() {
   const [loading, setLoading] = useState(true);
   const [percentages, setPercentages] = useState([]);
   const [scannerActive, setScannerActive] = useState(false);
+  const [scannerError, setScannerError] = useState("");
   const scannerRef = useRef(null);
+  const scannerRunningRef = useRef(false);
   const scannerSectionRef = useRef(null);
 
   const loadDashboard = async () => {
@@ -51,52 +53,89 @@ function StudentDashboard() {
     loadDashboard();
   }, []);
 
-  useEffect(() => {
-    if (!scannerActive) {
+  const stopScanner = async () => {
+    if (!scannerRef.current) {
+      scannerRunningRef.current = false;
       return;
     }
 
-    const scanner = new Html5QrcodeScanner(
-      "student-qr-reader",
-      { fps: 10, qrbox: 250 },
-      false
-    );
-    scannerRef.current = scanner;
-
-    scanner.render(
-      async (decodedText) => {
-        try {
-          let token = decodedText;
-          try {
-            const parsed = JSON.parse(decodedText);
-            token = parsed?.token || decodedText;
-          } catch (parseError) {
-            token = decodedText;
-          }
-          await API.post("/attendance/scan-qr", { token });
-          setModalMsg("Attendance marked successfully.");
-          await loadDashboard();
-        } catch (error) {
-          setModalMsg(error?.response?.data?.message || "Invalid or expired QR.");
-        } finally {
-          setShowModal(true);
-          if (scannerRef.current) {
-            await scannerRef.current.clear().catch(() => {});
-            scannerRef.current = null;
-          }
-          setScannerActive(false);
-        }
-      },
-      () => {}
-    );
-
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(() => {});
-        scannerRef.current = null;
+    try {
+      if (scannerRunningRef.current) {
+        await scannerRef.current.stop();
       }
-    };
-  }, [scannerActive]);
+      await scannerRef.current.clear();
+    } catch (error) {
+      // Ignore stop/clear errors to keep UI stable on mobile browsers.
+    } finally {
+      scannerRef.current = null;
+      scannerRunningRef.current = false;
+    }
+  };
+
+  const handleScanSuccess = async (decodedText) => {
+    try {
+      let token = decodedText;
+      try {
+        const parsed = JSON.parse(decodedText);
+        token = parsed?.token || decodedText;
+      } catch (parseError) {
+        token = decodedText;
+      }
+
+      await API.post("/attendance/scan-qr", { token });
+      setModalMsg("Attendance marked successfully.");
+      await loadDashboard();
+    } catch (error) {
+      setModalMsg(error?.response?.data?.message || "Invalid or expired QR.");
+    } finally {
+      await stopScanner();
+      setScannerActive(false);
+      setShowModal(true);
+    }
+  };
+
+  const startScanner = async () => {
+    setScannerError("");
+    await stopScanner();
+
+    try {
+      const cameras = await Html5Qrcode.getCameras();
+      if (!cameras || cameras.length === 0) {
+        setScannerError("No camera found on this device.");
+        return;
+      }
+
+      const preferredCamera = cameras.find((camera) =>
+        /back|rear|environment/i.test(camera.label || "")
+      ) || cameras[0];
+
+      const scanner = new Html5Qrcode("student-qr-reader");
+      scannerRef.current = scanner;
+
+      await scanner.start(
+        preferredCamera.id,
+        {
+          fps: 10,
+          qrbox: { width: 240, height: 240 },
+          aspectRatio: 1
+        },
+        handleScanSuccess,
+        () => {}
+      );
+      scannerRunningRef.current = true;
+      setScannerActive(true);
+    } catch (error) {
+      await stopScanner();
+      setScannerActive(false);
+      setScannerError(
+        "Camera could not start. Allow camera permission and close other apps using camera."
+      );
+    }
+  };
+
+  useEffect(() => () => {
+    stopScanner();
+  }, []);
 
   const overallPerformance = useMemo(() => {
     if (!percentages.length) {
@@ -121,9 +160,9 @@ function StudentDashboard() {
             <h2 className="page-title text-4xl font-black mt-2">My Attendance Profile</h2>
             <button
               className="mt-4 bg-teal-700 text-white px-4 py-2 rounded-lg font-semibold"
-              onClick={() => {
+              onClick={async () => {
                 scannerSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                setScannerActive(true);
+                await startScanner();
               }}
             >
               Open QR Scanner
@@ -208,7 +247,7 @@ function StudentDashboard() {
                 {!scannerActive ? (
                   <button
                     className="bg-teal-700 text-white px-4 py-2 rounded-lg font-semibold"
-                    onClick={() => setScannerActive(true)}
+                    onClick={startScanner}
                   >
                     Start QR Scan
                   </button>
@@ -216,10 +255,7 @@ function StudentDashboard() {
                   <button
                     className="bg-rose-600 text-white px-4 py-2 rounded-lg font-semibold"
                     onClick={async () => {
-                      if (scannerRef.current) {
-                        await scannerRef.current.clear().catch(() => {});
-                        scannerRef.current = null;
-                      }
+                      await stopScanner();
                       setScannerActive(false);
                     }}
                   >
@@ -230,6 +266,9 @@ function StudentDashboard() {
               <p className="text-sm text-slate-500 mb-3">
                 Scan the faculty QR within 2 minutes to mark attendance for your account.
               </p>
+              {scannerError && (
+                <p className="text-sm text-rose-600 font-medium mb-3">{scannerError}</p>
+              )}
               <div id="student-qr-reader" className="w-full max-w-md" />
             </div>
           </>
