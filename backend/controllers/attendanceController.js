@@ -5,12 +5,59 @@ const User = require("../models/User");
 const QrSession = require("../models/QrSession");
 const Subject = require("../models/Subject");
 const Classroom = require("../models/Classroom");
-const { sendLowAttendanceEmail } = require("../utils/mailer");
+const AlertLog = require("../models/AlertLog");
+const { sendLowAttendanceEmail, isAlertsEnabled } = require("../utils/mailer");
 
 const normalizeToDayStart = (inputDate = new Date()) => {
   const date = new Date(inputDate);
   date.setHours(0, 0, 0, 0);
   return date;
+};
+
+const sendLowAttendanceAlertsForStudents = async (studentIds) => {
+  if (!isAlertsEnabled || !Array.isArray(studentIds) || studentIds.length === 0) {
+    return;
+  }
+
+  const uniqueStudentIds = [...new Set(studentIds.map((id) => String(id)))];
+  const today = normalizeToDayStart(new Date());
+
+  for (const studentId of uniqueStudentIds) {
+    const student = await User.findOne({ _id: studentId, role: "student" }).select("name email");
+    if (!student || !student.email) {
+      continue;
+    }
+
+    const records = await Attendance.find({ student: student._id }).select("status");
+    const total = records.length;
+    const present = records.filter((record) => record.status === "Present").length;
+    const percentage = total === 0 ? 0 : Number(((present / total) * 100).toFixed(2));
+
+    if (percentage >= 75) {
+      continue;
+    }
+
+    const alreadySent = await AlertLog.findOne({
+      student: student._id,
+      date: today,
+      type: "LOW_ATTENDANCE"
+    });
+    if (alreadySent) {
+      continue;
+    }
+
+    try {
+      await sendLowAttendanceEmail(student.email, student.name, percentage);
+      await AlertLog.create({
+        student: student._id,
+        date: today,
+        type: "LOW_ATTENDANCE",
+        percentage
+      });
+    } catch (error) {
+      // Do not fail attendance flow when email provider fails.
+    }
+  }
 };
 
 // Mark Attendance (Faculty)
@@ -83,6 +130,7 @@ exports.markAttendance = async (req, res) => {
     }));
 
     await Attendance.insertMany(attendanceRows, { ordered: false });
+    await sendLowAttendanceAlertsForStudents(attendanceRows.map((row) => row.student));
 
     res.json({
       message: "Attendance Marked Successfully",
@@ -216,11 +264,6 @@ exports.getLowAttendanceStudents = async (req, res) => {
           percentage: roundedPercentage
         });
 
-        try {
-          await sendLowAttendanceEmail(student.email, student.name, roundedPercentage);
-        } catch (e) {
-          // Keep endpoint stable even if SMTP fails.
-        }
       }
     }
 
@@ -400,6 +443,7 @@ exports.scanQR = async (req, res) => {
       status: "Present",
       markedBy: req.user.id
     });
+    await sendLowAttendanceAlertsForStudents([req.user.id]);
 
     res.json({ message: "Attendance Marked via QR" });
   } catch (error) {

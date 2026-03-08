@@ -36,7 +36,7 @@ In Render:
 - `MONGO_URI` = Atlas connection string
 - `JWT_SECRET` = strong random secret
 - `CLIENT_ORIGIN` = frontend URL from Render (for example `https://attendance-frontend.onrender.com`)
-- Optional: `EMAIL_USER`, `EMAIL_PASS`
+- Optional for Gmail alerts: `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_ALERTS_ENABLED=true`
 
 ### Frontend service (`attendance-frontend`)
 - `REACT_APP_API_URL` = backend API URL + `/api`

@@ -19,6 +19,8 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
+      - key: EMAIL_ALERTS_ENABLED
+        value: "false"
 
   - type: web
     name: attendance-frontend
