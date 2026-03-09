@@ -5,6 +5,7 @@ const {
   getSubjects,
   deleteSubject,
   assignFaculty,
+  unassignFaculty,
   getFacultyClasses
 } = require("../controllers/subjectController");
 
@@ -21,5 +22,6 @@ router.delete("/:id", protect, authorizeRoles("admin"), deleteSubject);
 
 // Assign faculty to subject
 router.post("/assign-faculty", protect, authorizeRoles("admin"), assignFaculty);
+router.post("/unassign-faculty", protect, authorizeRoles("admin"), unassignFaculty);
 
 module.exports = router;

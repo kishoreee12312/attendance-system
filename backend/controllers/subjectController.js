@@ -72,6 +72,30 @@ exports.assignFaculty = async (req, res) => {
   }
 };
 
+exports.unassignFaculty = async (req, res) => {
+  const { subjectId, facultyId } = req.body;
+  try {
+    if (!subjectId || !facultyId) {
+      return res.status(400).json({ message: "subjectId and facultyId are required" });
+    }
+
+    const subject = await Subject.findById(subjectId);
+    if (!subject) {
+      return res.status(404).json({ message: "Subject not found" });
+    }
+
+    await Subject.updateOne(
+      { _id: subjectId },
+      { $pull: { faculty: facultyId } }
+    );
+
+    const updated = await Subject.findById(subjectId);
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getFacultyClasses = async (req, res) => {
   try {
     const facultyId = req.user.id;

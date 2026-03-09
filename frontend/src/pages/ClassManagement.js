@@ -70,6 +70,26 @@ function ClassManagement() {
     }
   };
 
+  const handleDeleteClass = async () => {
+    if (!isAdmin || !selectedClass) return;
+
+    const confirmed = window.confirm(
+      `Delete class ${selectedClass}? This works only when no students, attendance, or subject assignment exists.`
+    );
+    if (!confirmed) return;
+
+    setError("");
+    setMessage("");
+
+    try {
+      await API.delete(`/admin/classes/${encodeURIComponent(selectedClass)}`);
+      setMessage(`Class ${selectedClass} deleted successfully.`);
+      await loadData("");
+    } catch (err) {
+      setError(err?.response?.data?.message || "Failed to delete class");
+    }
+  };
+
   const averageStudentAttendance = useMemo(() => {
     if (!students.length) return 0;
     const sum = students.reduce((acc, student) => acc + (student.attendancePercentage || 0), 0);
@@ -127,6 +147,16 @@ function ClassManagement() {
               <option key={className} value={className}>{className}</option>
             ))}
           </select>
+          {isAdmin && (
+            <button
+              type="button"
+              className={`px-4 py-2 rounded-xl text-white ${selectedClass ? "bg-rose-600 hover:bg-rose-700" : "bg-slate-300 cursor-not-allowed"}`}
+              onClick={handleDeleteClass}
+              disabled={!selectedClass}
+            >
+              Delete Class
+            </button>
+          )}
         </div>
 
         {loading ? (

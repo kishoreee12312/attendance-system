@@ -4,6 +4,7 @@ const {
   createFaculty,
   createStudent,
   createClassroom,
+  deleteClassroom,
   getClassrooms,
   getStudents,
   getFaculty,
@@ -15,6 +16,7 @@ router.post("/create-faculty", protect, authorizeRoles("admin"), createFaculty);
 router.post("/create-student", protect, authorizeRoles("admin"), createStudent);
 router.post("/classes", protect, authorizeRoles("admin"), createClassroom);
 router.get("/classes", protect, authorizeRoles("admin"), getClassrooms);
+router.delete("/classes/:name", protect, authorizeRoles("admin"), deleteClassroom);
 router.get("/students", protect, authorizeRoles("admin"), getStudents);
 router.get("/faculty", protect, authorizeRoles("admin"), getFaculty);
 router.delete("/faculty/:id", protect, authorizeRoles("admin"), deleteFaculty);

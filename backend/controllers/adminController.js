@@ -1,5 +1,7 @@
 const User = require("../models/User");
 const Classroom = require("../models/Classroom");
+const Attendance = require("../models/Attendance");
+const Subject = require("../models/Subject");
 
 exports.createFaculty = async (req, res) => {
   try {
@@ -139,6 +141,49 @@ exports.getClassrooms = async (req, res) => {
     });
 
     res.json(response);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.deleteClassroom = async (req, res) => {
+  try {
+    const classNameParam = (req.params.name || "").trim().toUpperCase();
+    if (!classNameParam) {
+      return res.status(400).json({ message: "Class name is required" });
+    }
+
+    const classroom = await Classroom.findOne({ name: classNameParam });
+    if (!classroom) {
+      return res.status(404).json({ message: `Class ${classNameParam} not found` });
+    }
+
+    const studentCount = await User.countDocuments({
+      role: "student",
+      className: classNameParam
+    });
+    if (studentCount > 0) {
+      return res.status(400).json({
+        message: `Cannot delete ${classNameParam}. ${studentCount} students are still assigned to this class.`
+      });
+    }
+
+    const attendanceCount = await Attendance.countDocuments({ className: classNameParam });
+    if (attendanceCount > 0) {
+      return res.status(400).json({
+        message: `Cannot delete ${classNameParam}. Attendance records exist for this class.`
+      });
+    }
+
+    const assignedSubject = await Subject.findOne({ classNames: classNameParam }).select("name code");
+    if (assignedSubject) {
+      return res.status(400).json({
+        message: `Cannot delete ${classNameParam}. It is assigned to subject ${assignedSubject.name} (${assignedSubject.code}).`
+      });
+    }
+
+    await Classroom.deleteOne({ _id: classroom._id });
+    res.json({ message: `Class ${classNameParam} deleted successfully` });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
