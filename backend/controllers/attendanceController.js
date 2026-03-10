@@ -374,6 +374,122 @@ exports.getClassManagementData = async (req, res) => {
   }
 };
 
+// Faculty report analytics for overall, class-wise, and student-wise views
+exports.getFacultyReportAnalytics = async (req, res) => {
+  try {
+    const facultyId = req.user.id;
+    const assignedSubjects = await Subject.find({ faculty: facultyId }).select("_id classNames");
+    const subjectIds = assignedSubjects.map((subject) => subject._id);
+
+    if (subjectIds.length === 0) {
+      return res.json({
+        scope: "overall",
+        filters: {
+          classes: [],
+          students: [],
+          selectedClass: "",
+          selectedStudentId: ""
+        },
+        summary: {
+          totalRecords: 0,
+          presentRecords: 0,
+          absentRecords: 0,
+          presentPercentage: 0,
+          absentPercentage: 0,
+          label: "No assigned classes"
+        }
+      });
+    }
+
+    const classSet = new Set();
+    assignedSubjects.forEach((subject) => {
+      (subject.classNames || []).forEach((className) => {
+        const normalized = (className || "").trim().toUpperCase();
+        if (normalized) {
+          classSet.add(normalized);
+        }
+      });
+    });
+
+    const availableClasses = Array.from(classSet).sort();
+    const requestedScope = (req.query.scope || "overall").trim().toLowerCase();
+    const scope = ["overall", "class", "student"].includes(requestedScope) ? requestedScope : "overall";
+    const requestedClass = (req.query.className || "").trim().toUpperCase();
+    const selectedClass = availableClasses.includes(requestedClass) ? requestedClass : "";
+
+    const studentQuery = { role: "student" };
+    if (selectedClass) {
+      studentQuery.className = selectedClass;
+    } else if (availableClasses.length > 0) {
+      studentQuery.className = { $in: availableClasses };
+    }
+
+    const availableStudents = await User.find(studentQuery)
+      .select("name email className")
+      .sort({ name: 1 });
+
+    const requestedStudentId = (req.query.studentId || "").trim();
+    const selectedStudent = availableStudents.find((student) => String(student._id) === requestedStudentId) || null;
+
+    const attendanceQuery = {
+      subject: { $in: subjectIds }
+    };
+
+    if (scope === "class") {
+      if (!selectedClass) {
+        return res.status(400).json({ message: "Select a valid class for class report" });
+      }
+      attendanceQuery.className = selectedClass;
+    }
+
+    if (scope === "student") {
+      if (!selectedStudent) {
+        return res.status(400).json({ message: "Select a valid student for student report" });
+      }
+      attendanceQuery.student = selectedStudent._id;
+      attendanceQuery.className = selectedStudent.className;
+    }
+
+    const records = await Attendance.find(attendanceQuery).select("status");
+    const totalRecords = records.length;
+    const presentRecords = records.filter((record) => record.status === "Present").length;
+    const absentRecords = totalRecords - presentRecords;
+    const presentPercentage = totalRecords === 0 ? 0 : Number(((presentRecords / totalRecords) * 100).toFixed(2));
+    const absentPercentage = totalRecords === 0 ? 0 : Number(((absentRecords / totalRecords) * 100).toFixed(2));
+
+    const labelMap = {
+      overall: "Overall attendance",
+      class: `Class ${selectedClass} attendance`,
+      student: selectedStudent ? `${selectedStudent.name} attendance` : "Student attendance"
+    };
+
+    res.json({
+      scope,
+      filters: {
+        classes: availableClasses,
+        students: availableStudents.map((student) => ({
+          _id: student._id,
+          name: student.name,
+          email: student.email,
+          className: student.className
+        })),
+        selectedClass,
+        selectedStudentId: selectedStudent ? String(selectedStudent._id) : ""
+      },
+      summary: {
+        totalRecords,
+        presentRecords,
+        absentRecords,
+        presentPercentage,
+        absentPercentage,
+        label: labelMap[scope]
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // Generate QR for Attendance (Faculty)
 exports.generateQR = async (req, res) => {
   try {

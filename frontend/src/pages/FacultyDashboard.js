@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Chart, ArcElement, Tooltip, Legend } from "chart.js";
+import { Pie } from "react-chartjs-2";
 import API from "../services/api";
 import Layout from "../components/Layout";
+
+Chart.register(ArcElement, Tooltip, Legend);
 
 function FacultyDashboard() {
   const [students, setStudents] = useState([]);
@@ -17,6 +21,13 @@ function FacultyDashboard() {
   const [modalMsg, setModalMsg] = useState("");
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("class");
+  const [reportScope, setReportScope] = useState("overall");
+  const [reportClass, setReportClass] = useState("");
+  const [reportStudentId, setReportStudentId] = useState("");
+  const [reportData, setReportData] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState("");
+  const reportPrintRef = useRef(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -144,6 +155,114 @@ function FacultyDashboard() {
     return () => clearInterval(intervalId);
   }, [qrExpiresAt]);
 
+  useEffect(() => {
+    const fetchReportData = async () => {
+      setReportLoading(true);
+      setReportError("");
+
+      try {
+        const params = { scope: reportScope };
+        if (reportClass) {
+          params.className = reportClass;
+        }
+        if (reportStudentId) {
+          params.studentId = reportStudentId;
+        }
+
+        const res = await API.get("/attendance/faculty-report", { params });
+        setReportData(res.data);
+
+        if (!reportClass && res.data?.filters?.selectedClass) {
+          setReportClass(res.data.filters.selectedClass);
+        }
+        if (!reportStudentId && res.data?.filters?.selectedStudentId) {
+          setReportStudentId(res.data.filters.selectedStudentId);
+        }
+      } catch (error) {
+        setReportError(error?.response?.data?.message || "Failed to load report data");
+      } finally {
+        setReportLoading(false);
+      }
+    };
+
+    fetchReportData();
+  }, [reportScope, reportClass, reportStudentId]);
+
+  const reportStudents = useMemo(() => reportData?.filters?.students || [], [reportData]);
+
+  const reportChartData = useMemo(() => {
+    if (!reportData?.summary) {
+      return null;
+    }
+
+    return {
+      labels: ["Present", "Absent"],
+      datasets: [
+        {
+          data: [reportData.summary.presentPercentage, reportData.summary.absentPercentage],
+          backgroundColor: ["#0f766e", "#ea580c"],
+          borderWidth: 2,
+          borderColor: "#ffffff"
+        }
+      ]
+    };
+  }, [reportData]);
+
+  const downloadReportPdf = () => {
+    const reportNode = reportPrintRef.current;
+    if (!reportNode || !reportData?.summary) {
+      setModalMsg("Report is not ready to export yet.");
+      setShowModal(true);
+      return;
+    }
+
+    const chartCanvas = reportNode.querySelector("canvas");
+    const chartImage = chartCanvas ? chartCanvas.toDataURL("image/png") : "";
+    const reportWindow = window.open("", "_blank", "width=900,height=700");
+
+    if (!reportWindow) {
+      setModalMsg("Popup blocked. Allow popups to export the report as PDF.");
+      setShowModal(true);
+      return;
+    }
+
+    const generatedAt = new Date().toLocaleString();
+    reportWindow.document.write(`
+      <html>
+        <head>
+          <title>Faculty Attendance Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 32px; color: #0f172a; }
+            h1 { margin-bottom: 8px; }
+            p { margin: 6px 0; }
+            .meta { color: #475569; margin-bottom: 20px; }
+            .summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+            .card { border: 1px solid #cbd5e1; border-radius: 12px; padding: 16px; }
+            .card strong { display: block; font-size: 24px; margin-top: 6px; }
+            img { max-width: 420px; display: block; margin: 24px auto; }
+          </style>
+        </head>
+        <body>
+          <h1>${reportData.summary.label}</h1>
+          <p class="meta">Generated on ${generatedAt}</p>
+          <div class="summary">
+            <div class="card"><p>Total Records</p><strong>${reportData.summary.totalRecords}</strong></div>
+            <div class="card"><p>Present</p><strong>${reportData.summary.presentRecords}</strong></div>
+            <div class="card"><p>Absent</p><strong>${reportData.summary.absentRecords}</strong></div>
+            <div class="card"><p>Attendance</p><strong>${reportData.summary.presentPercentage}%</strong></div>
+          </div>
+          ${chartImage ? `<img src="${chartImage}" alt="Attendance report chart" />` : ""}
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    reportWindow.document.close();
+  };
+
   return (
     <Layout>
       <div className="max-w-6xl mx-auto">
@@ -164,6 +283,12 @@ function FacultyDashboard() {
             onClick={() => setActiveTab("management")}
           >
             Class Management
+          </button>
+          <button
+            className={`px-6 py-2.5 rounded-xl font-semibold transition ${activeTab === "reports" ? "bg-teal-700 text-white" : "text-slate-700"}`}
+            onClick={() => setActiveTab("reports")}
+          >
+            Reports
           </button>
         </div>
 
@@ -282,6 +407,132 @@ function FacultyDashboard() {
                 >
                   Open Class Management
                 </Link>
+              </div>
+            )}
+
+            {activeTab === "reports" && (
+              <div className="space-y-6">
+                <div className="glass-card p-6">
+                  <div className="flex flex-wrap gap-3 items-end">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Report Scope</label>
+                      <select
+                        className="border border-slate-200 p-2.5 rounded-xl bg-white min-w-48"
+                        value={reportScope}
+                        onChange={(e) => {
+                          const nextScope = e.target.value;
+                          setReportScope(nextScope);
+                          if (nextScope === "overall") {
+                            setReportClass("");
+                            setReportStudentId("");
+                          } else if (nextScope === "class") {
+                            setReportStudentId("");
+                          }
+                        }}
+                      >
+                        <option value="overall">Overall</option>
+                        <option value="class">Particular Class</option>
+                        <option value="student">Particular Student</option>
+                      </select>
+                    </div>
+
+                    {(reportScope === "class" || reportScope === "student") && (
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Class</label>
+                        <select
+                          className="border border-slate-200 p-2.5 rounded-xl bg-white min-w-48"
+                          value={reportClass}
+                          onChange={(e) => {
+                            setReportClass(e.target.value);
+                            setReportStudentId("");
+                          }}
+                        >
+                          <option value="">Choose Class</option>
+                          {(reportData?.filters?.classes || []).map((className) => (
+                            <option key={className} value={className}>
+                              {className}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {reportScope === "student" && (
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Student</label>
+                        <select
+                          className="border border-slate-200 p-2.5 rounded-xl bg-white min-w-72"
+                          value={reportStudentId}
+                          onChange={(e) => setReportStudentId(e.target.value)}
+                        >
+                          <option value="">Choose Student</option>
+                          {reportStudents.map((student) => (
+                            <option key={student._id} value={student._id}>
+                              {student.name} ({student.className})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <button
+                      className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-semibold transition"
+                      onClick={downloadReportPdf}
+                      disabled={reportLoading || !reportData?.summary}
+                    >
+                      Download PDF
+                    </button>
+                  </div>
+                </div>
+
+                {reportLoading ? (
+                  <div className="glass-card p-8 text-center text-slate-600">Loading report...</div>
+                ) : reportError ? (
+                  <div className="glass-card p-6 text-rose-700">{reportError}</div>
+                ) : (
+                  <div ref={reportPrintRef} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                    <div className="glass-card p-6">
+                      <h3 className="text-2xl font-bold mb-4 text-slate-800">{reportData?.summary?.label || "Attendance report"}</h3>
+                      {reportChartData && (
+                        <Pie
+                          data={reportChartData}
+                          options={{
+                            plugins: {
+                              legend: {
+                                labels: {
+                                  color: "#334155",
+                                  font: { size: 14, weight: "bold" }
+                                }
+                              }
+                            }
+                          }}
+                        />
+                      )}
+                    </div>
+
+                    <div className="glass-card p-6">
+                      <h3 className="text-2xl font-bold mb-4 text-slate-800">Report Summary</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="rounded-2xl bg-slate-50 p-4">
+                          <p className="text-sm text-slate-500">Total Records</p>
+                          <p className="text-3xl font-black text-slate-800 mt-1">{reportData?.summary?.totalRecords ?? 0}</p>
+                        </div>
+                        <div className="rounded-2xl bg-emerald-50 p-4">
+                          <p className="text-sm text-emerald-700">Present</p>
+                          <p className="text-3xl font-black text-emerald-800 mt-1">{reportData?.summary?.presentRecords ?? 0}</p>
+                        </div>
+                        <div className="rounded-2xl bg-orange-50 p-4">
+                          <p className="text-sm text-orange-700">Absent</p>
+                          <p className="text-3xl font-black text-orange-800 mt-1">{reportData?.summary?.absentRecords ?? 0}</p>
+                        </div>
+                        <div className="rounded-2xl bg-teal-50 p-4">
+                          <p className="text-sm text-teal-700">Attendance</p>
+                          <p className="text-3xl font-black text-teal-800 mt-1">{reportData?.summary?.presentPercentage ?? 0}%</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </>

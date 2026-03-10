@@ -7,6 +7,7 @@ const {
   getAdminAnalytics,
   getLowAttendanceStudents,
   getClassManagementData,
+  getFacultyReportAnalytics,
   generateQR,
   scanQR
 } = require("../controllers/attendanceController");
@@ -28,6 +29,7 @@ router.get("/admin-analytics", protect, authorizeRoles("admin"), getAdminAnalyti
 // Admin: low attendance students
 router.get("/low-attendance", protect, authorizeRoles("admin"), getLowAttendanceStudents);
 router.get("/class-management", protect, authorizeRoles("admin", "faculty"), getClassManagementData);
+router.get("/faculty-report", protect, authorizeRoles("faculty"), getFacultyReportAnalytics);
 
 // Faculty generate QR for attendance
 router.post("/generate-qr", protect, authorizeRoles("faculty"), generateQR);
